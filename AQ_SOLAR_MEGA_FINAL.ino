@@ -83,11 +83,7 @@ bool charger = 0;
 bool pump = 0;
 bool online;
 bool dark = 0;
-bool door = 0;
 float p10,p25;
-
-//const int sensor_interval = 2000;   // to set reading intervals from sensors (sec)
-//const int relay_duration = 120000;  //relay timer (2minutes x 60seconds x 1000ms)
 
 unsigned long currentMillis = 0;    // stores the value of millis() in each iteration of loop()
 unsigned long previousMillis = 0;   // for sensors
@@ -209,8 +205,8 @@ void motion(void) {
       motion_state = 1;
       relay_counter = currentMillis;
   } 
-
-  if ((motion_state == 1) && (currentMillis - relay_counter <= 90000)) {
+  
+  if ((motion_state == 1) && (currentMillis - relay_counter <= 90000)) { //(90000=1.5min x 60sec x 1000ms)
       digitalWrite(RLY1, LOW);
       digitalWrite(RLY2, LOW);
       digitalWrite(RELAY_LED, HIGH);
