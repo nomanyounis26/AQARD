@@ -83,6 +83,7 @@ bool charger = 0;
 bool pump = 0;
 bool online;
 bool dark = 0;
+bool door = 0;
 float p10,p25;
 
 //const int sensor_interval = 2000;   // to set reading intervals from sensors (sec)
@@ -200,13 +201,13 @@ void motion(void) {
   PIRstate = digitalRead(PIR);
   Reedstate = digitalRead(REED);
   
-  if (motion_state == 0 && LDRstate==1) {
+  if (motion_state==0 && LDRstate==1) {
       dark = 1; //night time
   }
-
-  if (dark==1 && PIRstate==1 || dark==1 && Reedstate==0) {
-    motion_state = 1;
-    relay_counter = currentMillis;
+  
+  if (dark==1 && PIRstate==1 || dark==1 && Reedstate==1) {
+      motion_state = 1;
+      relay_counter = currentMillis;
   } 
 
   if ((motion_state == 1) && (currentMillis - relay_counter <= 90000)) {
@@ -214,7 +215,8 @@ void motion(void) {
       digitalWrite(RLY2, LOW);
       digitalWrite(RELAY_LED, HIGH);
       led3.on();
-    } else {
+    } else if (motion_state==1 && Reedstate==1){
+    } else{
       motion_state = 0;
       digitalWrite(RLY1, HIGH);
       digitalWrite(RLY2, HIGH);
@@ -563,4 +565,3 @@ BLYNK_WRITE(V15) {
 void print_data(void) {
     Serial.println(PIRstate);
 } */
-//end
