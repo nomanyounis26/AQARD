@@ -30,7 +30,7 @@ SDS011 my_sds(Serial2);
 
 #define DHTPIN 7
 #define LDR 5
-#define PIR 9
+#define PIR 49
 #define REED 11
 #define SOL_LED 23
 #define BAT_RED_LED 25
@@ -44,6 +44,7 @@ SDS011 my_sds(Serial2);
 #define MSFT2 44
 #define RLY1 39
 #define RLY2 37
+#define MOTOR 45
 
 #define DHTTYPE DHT11  
 DHT dht(DHTPIN, DHTTYPE);
@@ -77,7 +78,7 @@ float loadvoltage = 0.00;
 //float power = 0.00;
 float t=0.00, h=0.00, hic = 0.00;
 int disconnects = 0;
-bool motion_state = 0;
+bool light = 0;
 bool charging = false;
 bool charger = 0;
 bool pump = 0;
@@ -91,7 +92,7 @@ unsigned long relay_counter = 0;  //to count time lapsed since relay on
 unsigned long ts_previous = 0;    //when last time uploaded to thinkspeak
 unsigned long charge_timer = 0;    //to count time lapsed since charging
 unsigned long connection_time = 0;    //to count time lapsed since charging
-unsigned long pump_time = 0;
+unsigned long pump_time = 0;    //for water pump
 
 WidgetLED led1(V20); //solar led
 WidgetLED led2(V21); //battery led
@@ -127,7 +128,7 @@ void setup() {
       
     lcd.setCursor(0,2);
     lcd.print("CONNECTED");
-    timer.setInterval(2000L, get_sensor_data);
+    timer.setInterval(10000L, get_sensor_data);
    } else {
       lcd.setCursor(0,2);
       lcd.print("OFFLINE MODE");
@@ -161,12 +162,14 @@ void setup() {
   pinMode(MSFT1,OUTPUT);
   pinMode(MSFT2, OUTPUT);
   pinMode(A8, INPUT); //capacitative soil moisture sensor
+  pinMode(MOTOR, OUTPUT);
  
   digitalWrite(RLY1, HIGH);
   digitalWrite(RLY2, HIGH);  
   digitalWrite(PWR_MSFT, LOW);
   digitalWrite(MSFT1, LOW);
   digitalWrite(MSFT2, LOW);
+  digitalWrite(MOTOR, LOW);
 
   tone(BUZZER, 1000, 1000);   
 
@@ -178,7 +181,11 @@ void setup() {
   lcd.createChar(6, charge);
   lcd.createChar(7, not_charge);
   lcd.clear();
+  led1.off();
   led2.on();
+  led3.off();
+  led4.off();
+  get_sensor_data();
 }
 
 void loop() {
@@ -196,109 +203,76 @@ void motion(void) {
   LDRstate = digitalRead(LDR);
   PIRstate = digitalRead(PIR);
   Reedstate = digitalRead(REED);
-  
-  if (motion_state==0 && LDRstate==1) {
-      dark = 1; //night time
-  }
-  
-  if (dark==1 && PIRstate==1 || dark==1 && Reedstate==1) {
-      motion_state = 1;
-      relay_counter = currentMillis;
-  } 
-  
-  if ((motion_state == 1) && (currentMillis - relay_counter <= 90000)) { //(90000=1.5min x 60sec x 1000ms)
-      digitalWrite(RLY1, LOW);
-      digitalWrite(RLY2, LOW);
-      digitalWrite(RELAY_LED, HIGH);
-      led3.on();
-    } else if (motion_state==1 && Reedstate==1){
-    } else{
-      motion_state = 0;
-      digitalWrite(RLY1, HIGH);
-      digitalWrite(RLY2, HIGH);
-      digitalWrite(RELAY_LED, LOW);
-      led3.off();
+
+  if(!light) {
+    if (LDRstate && PIRstate || LDRstate && Reedstate) {
+      light = 1;
+      lightfunc();
     }
+  }
+      
+  if(light) {
+    lightfunc();
+  }
 }
 
 void get_sensor_data() {   
-
-  if (currentMillis - previousMillis >= 2000) {
-        int cur_temp = read_adc(SOL_ADC) - 12; 
-        solar_current = (((cur_temp * scale)-(vf*0.5))/0.185)*1000; //mA
-        solar_volt = read_adc(SOL_VOL)*scale*11; //V
-        //sol_pwr = (solar_current/1000) * solar_volt; //W
-        shuntvoltage = ina219.getShuntVoltage_mV();
-        busvoltage = ina219.getBusVoltage_V();
-        current_mA = ina219.getCurrent_mA();
-        loadvoltage = busvoltage + (shuntvoltage / 1000); // V
-        //power = current_mA * loadvoltage; //mW
-        int soil = analogRead(A8); //Soil sensor at AnalogPin08(A8)
-        moisture = map(soil, 239, 595, 100, 0); //wet=239, dry=595 
+  int cur_temp = read_adc(SOL_ADC) - 12; 
+  solar_current = (((cur_temp * scale)-(vf*0.5))/0.185)*1000; //mA
+  solar_volt = read_adc(SOL_VOL)*scale*11; //V
+  shuntvoltage = ina219.getShuntVoltage_mV();
+  busvoltage = ina219.getBusVoltage_V();
+  current_mA = ina219.getCurrent_mA();
+  loadvoltage = busvoltage + (shuntvoltage / 1000); // V
+  int soil = analogRead(A8); //Soil sensor at AnalogPin08(A8)
+  moisture = map(soil, 239, 595, 100, 0); //wet=239, dry=595 
+  if (moisture<0) { moisture = 50; }
             
-        if(solar_volt >= 5) {
-          charging = true;
-          led1.on();
-//        loadvoltage = loadvoltage - 0.10;
-        } else {
-          charging = false;
-          led1.off();
-          loadvoltage = loadvoltage + 0.11; //+0.21
-          if(solar_volt < 1) {
-            solar_volt = 0;
-          }
-        }
-        
-        if (solar_current < 0) { 
-            solar_current = 0;
-        }
-      
-        if (loadvoltage < 1.2) loadvoltage = 0;
-        if(current_mA < 2 ) {    
-          current_mA = 0;
-        }
-        
-        aq = read_adc(AIR_SEN);
-        h = dht.readHumidity();
-        t = dht.readTemperature();
-        hic = dht.computeHeatIndex(t, h, false);
-        
-        my_sds.read(&p25,&p10);
-
-        led_indication();
-        lcd_display();
-        //print_data();
-        
-        if ((currentMillis - ts_previous >= 3600000) && online == true) {
-           thingspeak_update();
-           ts_previous = currentMillis;
-        }
-
-        if(charger == 1) {
-          charge_relay();
-        }
-
-        if(moisture <= 30 && pump == 0) {
-          pump = 1;
-          pump_time = currentMillis;
-          
-        }
-        if(pump == 1) {
-          check_pump();
-        }
-        
-        previousMillis = currentMillis;
-    } 
-}
+  if(solar_current > 300) {
+    charging = true;
+    led1.on();
+  } else {
+    charging = false;
+    led1.off();
+    loadvoltage = loadvoltage + 0.11; //+0.21
+    if(solar_volt < 1) {
+      solar_volt = 0;
+      solar_current = 0;
+    }
+  }
+  
+  if (loadvoltage < 1.2) loadvoltage = 0;
+  if(current_mA < 2 ) { current_mA = 0; }
  
+  aq = read_adc(AIR_SEN);
+  h = dht.readHumidity();
+  t = dht.readTemperature();
+  hic = dht.computeHeatIndex(t, h, false);
+        
+  my_sds.read(&p25,&p10);
+
+  led_indication();
+  lcd_display();
+        
+  if ((currentMillis - ts_previous >= 3600000) && online) {
+    thingspeak_update();
+    ts_previous = currentMillis;
+  }
+  
+  if(moisture <= 30 && pump == 0) {
+    pump = 1;
+    pump_time = currentMillis;
+  }
+  if(pump == 1) { check_pump(); }
+  
+  if(charger == 1) { charge_relay(); }
+}
+
 void led_indication(void) {
-   if (charging) {
-      digitalWrite(SOL_LED, HIGH);
-   } else {
-      digitalWrite (SOL_LED, LOW);
-   }
+   digitalWrite(SOL_LED, charging);
+   
    if(loadvoltage >= BAT_MAX) {   
-      digitalWrite(BAT_GREEN_LED,HIGH);  
+      digitalWrite(BAT_GREEN_LED, HIGH);  
       digitalWrite(BAT_RED_LED, LOW);
       Blynk.setProperty(V21, "color", "#0C990C");
    } else if(loadvoltage <= BAT_MIN) {
@@ -352,14 +326,14 @@ void lcd_display() {
   lcd.print("V");
   
   if (solar_current > 1000) {
-    Blynk.virtualWrite(V8, String((solar_current / 1000), 3) + String(" A") );
+    Blynk.virtualWrite(V8, String((solar_current / 1000), 1) + String(" A") );
     lcd.setCursor(8, 2);
     lcd.print("     ");
     lcd.setCursor(8, 2);
     lcd.print((solar_current / 1000), 2);
     lcd.print("A");
   } else {
-    Blynk.virtualWrite(V8, String(solar_current, 2) + String(" mA") );
+    Blynk.virtualWrite(V8, String(solar_current, 0) + String(" mA") );
     lcd.setCursor(8, 2);
     lcd.print("     ");
     lcd.setCursor(8, 2);
@@ -374,14 +348,14 @@ void lcd_display() {
   lcd.print("V");
 
   if (current_mA > 1000) {
-    Blynk.virtualWrite(V6, String((current_mA / 1000), 3) + String(" A") );
+    Blynk.virtualWrite(V6, String((current_mA / 1000), 1) + String(" A") );
     lcd.setCursor(8, 3);
     lcd.print("     ");
     lcd.setCursor(8, 3);
     lcd.print((current_mA / 1000), 2);
     lcd.print("A");
   } else {
-    Blynk.virtualWrite(V6, String(current_mA, 2) + String(" mA"));
+    Blynk.virtualWrite(V6, String(current_mA, 0) + String(" mA"));
     lcd.setCursor(8, 3);
     lcd.print("     ");
     lcd.setCursor(8, 3);
@@ -398,7 +372,7 @@ void lcd_display() {
   Blynk.virtualWrite(V9, percentage); 
   if (percentage >= 50){Blynk.setProperty(V9, "color", "#0C990C");}
   if (percentage> 20 && percentage < 50){Blynk.setProperty(V9, "color", "#d69e04");}  
-  if (percentage <= 20){Blynk.notify("Battery Low, pls recharge");Blynk.setProperty(V9, "color", "#e80606");}
+  if (percentage <= 20){Blynk.setProperty(V9, "color", "#e80606");}
   
   lcd.setCursor(14, 2); 
   lcd.write(2);
@@ -432,6 +406,30 @@ void lcd_display() {
   Blynk.virtualWrite(V5, loadvoltage);
   Blynk.virtualWrite(V7, solar_volt); 
   Blynk.virtualWrite(V16, moisture); 
+}
+
+void lightfunc() {
+  if(light && dark){ //light is the signal to turn light on, dark is the state of darkness
+    digitalWrite(RLY1, LOW);
+    digitalWrite(RLY2, LOW);
+    digitalWrite(RELAY_LED, HIGH);
+    relay_counter = currentMillis;
+    dark = 0;
+    led3.on();
+  }
+
+  if(Reedstate) {
+    relay_counter = currentMillis;
+  }
+
+  if(currentMillis - relay_counter >= 90000 || !light) {
+      digitalWrite(RLY1, HIGH);
+      digitalWrite(RLY2, HIGH);
+      digitalWrite(RELAY_LED, LOW);
+      dark = 1;
+      light = 0;
+      led3.off();
+  }
 }
 
 int read_adc(int adc_parameter) {
@@ -483,12 +481,12 @@ void check_connection (void) {
 
 BLYNK_WRITE(V10) {
   int pinValue = param.asInt();
-  motion_state = pinValue;
+  light = pinValue;
   if (pinValue == 1) {
-    relay_counter = currentMillis;
-    motion();  
+    dark = 1;
+    lightfunc();  
   } else if (pinValue == 0) {
-    motion();
+    lightfunc();
   }
 }
 
@@ -502,12 +500,12 @@ void charge_relay(void) {
 }
 
 void check_pump(void){
-  if(pump == 1 && (currentMillis - pump_time <= 15000)) {
-    digitalWrite(MSFT1, HIGH);
+  if(pump == 1 && (currentMillis - pump_time <= 60000)) {
+    digitalWrite(MOTOR, HIGH);
     led4.on();
   } else {
     pump = 0;
-    digitalWrite(MSFT1, LOW); 
+    digitalWrite(MOTOR, LOW); 
     led4.off();
   }  
 }
@@ -557,7 +555,9 @@ BLYNK_WRITE(V15) {
   }
 }
 
-/*
-void print_data(void) {
-    Serial.println(PIRstate);
-} */
+BLYNK_WRITE(V17) {
+  int pinValue_6 = param.asInt();
+  if (pinValue_6 == 1) {
+     get_sensor_data();
+  }
+}
