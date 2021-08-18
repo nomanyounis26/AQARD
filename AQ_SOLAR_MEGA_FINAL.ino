@@ -254,7 +254,7 @@ void get_sensor_data() {
   led_indication();
   lcd_display();
         
-  if ((currentMillis - ts_previous >= 3600000) && online) {
+  if ((currentMillis - ts_previous >= 10800000) && online) {
     thingspeak_update();
     ts_previous = currentMillis;
   }
@@ -330,7 +330,7 @@ void lcd_display() {
     lcd.setCursor(8, 2);
     lcd.print("     ");
     lcd.setCursor(8, 2);
-    lcd.print((solar_current / 1000), 2);
+    lcd.print((solar_current / 1000), 1);
     lcd.print("A");
   } else {
     Blynk.virtualWrite(V8, String(solar_current, 0) + String(" mA") );
@@ -422,6 +422,10 @@ void lightfunc() {
     relay_counter = currentMillis;
   }
 
+  if((currentMillis - relay_counter > 60000) && PIRstate) {
+    relay_counter = relay_counter + 30000;
+  }
+
   if(currentMillis - relay_counter >= 90000 || !light) {
       digitalWrite(RLY1, HIGH);
       digitalWrite(RLY2, HIGH);
@@ -500,7 +504,7 @@ void charge_relay(void) {
 }
 
 void check_pump(void){
-  if(pump == 1 && (currentMillis - pump_time <= 60000)) {
+  if(pump == 1 && (currentMillis - pump_time <= 120000)) {
     digitalWrite(MOTOR, HIGH);
     led4.on();
   } else {
